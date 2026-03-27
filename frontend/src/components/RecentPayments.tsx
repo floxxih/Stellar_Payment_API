@@ -10,6 +10,8 @@ import {
   useMerchantId,
 } from "@/lib/merchant-store";
 import { usePaymentSocket } from "@/lib/usePaymentSocket";
+import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
+import "react-loading-skeleton/dist/skeleton.css";
 import { localeToLanguageTag } from "@/i18n/config";
 
 interface Payment {
@@ -48,7 +50,7 @@ function toStatusLabel(
   return t.has(`statuses.${status}`) ? t(`statuses.${status}`) : status;
 }
 
-export default function RecentPayments() {
+export default function RecentPayments({ showSkeleton = false }: { showSkeleton?: boolean }) {
   const t = useTranslations("recentPayments");
   const locale = localeToLanguageTag(useLocale());
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -200,13 +202,53 @@ export default function RecentPayments() {
     setSelectedPayment(null);
   };
 
-  if (loading) {
+  if (showSkeleton || loading) {
     return (
-      <div className="animate-pulse space-y-3">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-12 w-full rounded-lg bg-white/5" />
-        ))}
-      </div>
+      <SkeletonTheme baseColor="#1e293b" highlightColor="#334155">
+        <div className="flex flex-col gap-4">
+          {/* Search and Filters Skeleton */}
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Skeleton width={60} height={14} borderRadius={4} />
+                <Skeleton height={40} borderRadius={12} />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="flex flex-col gap-2">
+                    <Skeleton width={60} height={14} borderRadius={4} />
+                    <Skeleton height={40} borderRadius={12} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Table Skeleton */}
+          <div className="overflow-x-auto rounded-xl border border-white/10">
+            <div className="border-b border-white/10 bg-white/5 px-4 py-3">
+              <div className="flex justify-between">
+                {[...Array(5)].map((_, i) => (
+                  <Skeleton key={i} width={80} height={14} borderRadius={4} />
+                ))}
+              </div>
+            </div>
+            <div className="divide-y divide-white/5">
+              {[...Array(5)].map((_, i) => (
+                <div key={i} className="px-4 py-4">
+                  <div className="flex justify-between items-center">
+                    <Skeleton width={70} height={24} borderRadius={999} />
+                    <Skeleton width={100} height={20} borderRadius={4} />
+                    <Skeleton width={120} height={16} borderRadius={4} className="hidden sm:block" />
+                    <Skeleton width={80} height={16} borderRadius={4} className="hidden md:block" />
+                    <Skeleton width={60} height={16} borderRadius={4} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </SkeletonTheme>
     );
   }
 
