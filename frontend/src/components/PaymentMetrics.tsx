@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import {
   CartesianGrid,
   Legend,
@@ -23,6 +24,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import Skeleton, { SkeletonTheme } from "react-loading-skeleton";
+import "react-loading-skeleton/dist/skeleton.css";
+import { localeToLanguageTag } from "@/i18n/config";
 
 type TimeRange = "7D" | "30D" | "1Y";
 type ExportFormat = "png" | "svg";
@@ -46,6 +50,8 @@ interface MetricsResponse {
   }>;
   total_volume: number;
   total_payments: number;
+  confirmed_count: number;
+  success_rate: number;
 }
 
 const CHART_HEIGHT = 300;
@@ -58,12 +64,6 @@ const ASSET_COLORS: Record<string, string> = {
 
 const FALLBACK_COLORS = ["#0ea5e9", "#10b981", "#8b5cf6", "#f43f5e", "#f97316"];
 const TIME_RANGES: TimeRange[] = ["7D", "30D", "1Y"];
-
-const RANGE_LABELS: Record<TimeRange, string> = {
-  "7D": "7 Days",
-  "30D": "30 Days",
-  "1Y": "1 Year",
-};
 
 function colorForAsset(asset: string, index: number): string {
   return ASSET_COLORS[asset] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
@@ -166,10 +166,12 @@ function ChartExportButton({
   containerRef,
   exporting,
   onExport,
+  t,
 }: {
   containerRef: RefObject<HTMLDivElement>;
   exporting: boolean;
   onExport: (format: ExportFormat, containerRef: RefObject<HTMLDivElement>) => Promise<void>;
+  t: ReturnType<typeof useTranslations>;
 }) {
   return (
     <DropdownMenu>
@@ -198,22 +200,24 @@ function ChartExportButton({
               strokeLinejoin="round"
             />
           </svg>
-          {exporting ? "Exporting..." : "Download Image"}
+          {exporting ? t("exporting") : t("downloadImage")}
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem onSelect={() => void onExport("png", containerRef)}>
-          Download PNG
+          {t("downloadPng")}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => void onExport("svg", containerRef)}>
-          Download SVG
+          {t("downloadSvg")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
 }
 
-export default function PaymentMetrics() {
+export default function PaymentMetrics({ showSkeleton = false }: { showSkeleton?: boolean }) {
+  const t = useTranslations("paymentMetrics");
+  const locale = localeToLanguageTag(useLocale());
   const [summary, setSummary] = useState<MetricsResponse | null>(null);
   const [volumeData, setVolumeData] = useState<VolumeResponse | null>(null);
   const [hiddenAssets, setHiddenAssets] = useState<Set<string>>(new Set());
@@ -238,16 +242,16 @@ export default function PaymentMetrics() {
       signal: controller.signal,
     })
       .then((response) =>
-        response.ok ? response.json() : Promise.reject(new Error("Failed to fetch metrics")),
+        response.ok ? response.json() : Promise.reject(new Error(t("fetchMetricsFailed"))),
       )
       .then((data: MetricsResponse) => setSummary(data))
       .catch((fetchError) => {
         if (fetchError instanceof Error && fetchError.name === "AbortError") return;
-        setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch metrics");
+        setError(fetchError instanceof Error ? fetchError.message : t("fetchMetricsFailed"));
       });
 
     return () => controller.abort();
-  }, [apiKey, hydrated]);
+  }, [apiKey, hydrated, t]);
 
   useEffect(() => {
     if (!hydrated || !apiKey) {
@@ -267,17 +271,17 @@ export default function PaymentMetrics() {
       .then((response) =>
         response.ok
           ? response.json()
-          : Promise.reject(new Error("Failed to fetch volume data")),
+          : Promise.reject(new Error(t("fetchVolumeFailed"))),
       )
       .then((data: VolumeResponse) => setVolumeData(data))
       .catch((fetchError) => {
         if (fetchError instanceof Error && fetchError.name === "AbortError") return;
-        setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch volume data");
+        setError(fetchError instanceof Error ? fetchError.message : t("fetchVolumeFailed"));
       })
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, [apiKey, hydrated, range]);
+  }, [apiKey, hydrated, range, t]);
 
   const toggleAsset = (asset: string) => {
     setHiddenAssets((prev) => {
@@ -296,22 +300,53 @@ export default function PaymentMetrics() {
 
     try {
       await exportChart(containerRef, format, `multi-asset-volume-${range.toLowerCase()}`);
-      toast.success(`Chart downloaded as ${format.toUpperCase()}`);
+      toast.success(t("exportSuccess", { format: format.toUpperCase() }));
     } catch (exportError) {
       const message =
-        exportError instanceof Error ? exportError.message : "Failed to export chart.";
+        exportError instanceof Error ? exportError.message : t("exportFailed");
       toast.error(message);
     } finally {
       setExporting(false);
     }
   };
 
-  if (loading || !hydrated) {
+  if (showSkeleton || loading || !hydrated) {
     return (
-      <div className="animate-pulse space-y-4">
-        <div className="h-10 w-48 rounded-lg bg-white/5" />
-        <div className="h-80 w-full rounded-xl bg-white/5" />
-      </div>
+      <SkeletonTheme baseColor="#1e293b" highlightColor="#334155">
+        <div className="flex flex-col gap-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {[...Array(2)].map((_, i) => (
+              <div key={i} className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                <Skeleton width={100} height={14} borderRadius={4} />
+                <div className="mt-2 flex items-baseline gap-2">
+                  <Skeleton width={120} height={36} borderRadius={6} />
+                  <Skeleton width={40} height={20} borderRadius={4} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-4 rounded-xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-col gap-2">
+                <Skeleton width={240} height={24} borderRadius={6} />
+                <Skeleton width={180} height={16} borderRadius={4} />
+              </div>
+              <div className="flex gap-2">
+                <Skeleton width={100} height={32} borderRadius={8} />
+                <Skeleton width={140} height={32} borderRadius={8} />
+              </div>
+            </div>
+            <div className="mt-4 flex gap-2">
+              <Skeleton width={60} height={24} borderRadius={12} />
+              <Skeleton width={60} height={24} borderRadius={12} />
+            </div>
+            <div className="mt-4 h-[300px]">
+              <Skeleton height="100%" borderRadius={8} />
+            </div>
+          </div>
+        </div>
+      </SkeletonTheme>
     );
   }
 
@@ -323,7 +358,7 @@ export default function PaymentMetrics() {
           onClick={() => setError(null)}
           className="mt-3 text-xs text-slate-400 underline"
         >
-          Retry
+          {t("retry")}
         </button>
       </div>
     );
@@ -332,7 +367,7 @@ export default function PaymentMetrics() {
   const assets = volumeData?.assets ?? [];
   const chartData = (volumeData?.data ?? []).map((dataPoint) => ({
     ...dataPoint,
-    dateShort: new Date(dataPoint.date).toLocaleDateString("en-US", {
+    dateShort: new Date(dataPoint.date).toLocaleDateString(locale, {
       month: "short",
       day: "numeric",
     }),
@@ -341,10 +376,10 @@ export default function PaymentMetrics() {
   return (
     <div className="flex flex-col gap-6">
       {summary && (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
             <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
-              7-Day Volume
+              {t("sevenDayVolume")}
             </p>
             <div className="mt-2 flex items-baseline gap-2">
               <p className="text-3xl font-bold text-mint">
@@ -356,15 +391,41 @@ export default function PaymentMetrics() {
 
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
             <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
-              Total Payments
+              {t("totalPayments")}
             </p>
             <div className="mt-2 flex items-baseline gap-2">
               <p className="text-3xl font-bold text-mint">
                 {summary.total_payments}
               </p>
               <p className="text-sm text-slate-400">
-                {summary.total_payments === 1 ? "payment" : "payments"}
+                {t("paymentsCount", { count: summary.total_payments })}
               </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+            <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
+              Confirmed
+            </p>
+            <div className="mt-2 flex items-baseline gap-2">
+              <p className="text-3xl font-bold text-green-400">
+                {summary.confirmed_count}
+              </p>
+              <p className="text-sm text-slate-400">
+                {summary.confirmed_count === 1 ? "intent" : "intents"}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+            <p className="font-mono text-xs uppercase tracking-wider text-slate-400">
+              Success Rate
+            </p>
+            <div className="mt-2 flex items-baseline gap-2">
+              <p className="text-3xl font-bold text-green-400">
+                {summary.success_rate}
+              </p>
+              <p className="text-sm text-slate-400">%</p>
             </div>
           </div>
         </div>
@@ -377,10 +438,10 @@ export default function PaymentMetrics() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="font-semibold text-white">
-              Multi-Asset Volume Comparison
+              {t("chartTitle")}
             </h3>
             <p className="text-xs text-slate-400">
-              Daily transaction volume broken down by asset
+              {t("chartSubtitle")}
             </p>
           </div>
 
@@ -396,7 +457,7 @@ export default function PaymentMetrics() {
                       : "text-slate-400 hover:text-white"
                   }`}
                   aria-pressed={range === nextRange}
-                  aria-label={`Show ${RANGE_LABELS[nextRange]}`}
+                  aria-label={t("showRange", { range: t(`ranges.${nextRange}`) })}
                 >
                   {nextRange}
                 </button>
@@ -408,6 +469,7 @@ export default function PaymentMetrics() {
                 containerRef={chartContainerRef}
                 exporting={exporting}
                 onExport={handleExport}
+                t={t}
               />
             )}
           </div>
@@ -417,7 +479,7 @@ export default function PaymentMetrics() {
           <div
             className="flex flex-wrap gap-2"
             role="group"
-            aria-label="Toggle asset visibility"
+            aria-label={t("toggleAssetVisibility")}
           >
             {assets.map((asset, index) => {
               const color = colorForAsset(asset, index);
@@ -432,7 +494,7 @@ export default function PaymentMetrics() {
                   }`}
                   style={{ borderColor: color, color }}
                   aria-pressed={!hidden}
-                  aria-label={`${hidden ? "Show" : "Hide"} ${asset}`}
+                  aria-label={hidden ? t("showAsset", { asset }) : t("hideAsset", { asset })}
                 >
                   <span
                     className="inline-block h-2 w-2 rounded-full"
@@ -450,7 +512,7 @@ export default function PaymentMetrics() {
 
         {assets.length === 0 ? (
           <p className="py-12 text-center text-sm text-slate-500">
-            No completed payments in this period.
+            {t("noPayments")}
           </p>
         ) : (
           <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
