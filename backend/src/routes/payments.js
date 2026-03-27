@@ -246,7 +246,7 @@ router.post("/verify-payment/:id", verifyPaymentRateLimit, async (req, res, next
     const { data, error } = await supabase
       .from("payments")
       .select(
-        "id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, merchants(webhook_secret)"
+        "id, amount, asset, asset_issuer, recipient, status, tx_id, memo, memo_type, webhook_url, created_at, merchants(webhook_secret)"
       )
       .eq("id", req.params.id)
       .is("deleted_at", null)
@@ -282,9 +282,18 @@ router.post("/verify-payment/:id", verifyPaymentRateLimit, async (req, res, next
       return res.json({ status: "pending" });
     }
 
+    // Calculate completion duration in seconds
+    const createdAt = new Date(data.created_at);
+    const confirmedAt = new Date();
+    const durationSeconds = Math.floor((confirmedAt - createdAt) / 1000);
+
     const { error: updateError } = await supabase
       .from("payments")
-      .update({ status: "confirmed", tx_id: match.transaction_hash })
+      .update({ 
+        status: "confirmed", 
+        tx_id: match.transaction_hash,
+        completion_duration_seconds: durationSeconds
+      })
       .eq("id", data.id);
 
     if (updateError) {

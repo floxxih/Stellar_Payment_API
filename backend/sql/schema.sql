@@ -21,6 +21,7 @@ create table if not exists payments (
   webhook_url text,
   status text not null default 'pending',
   tx_id text,
+  completion_duration_seconds integer,
   metadata jsonb,
   created_at timestamptz not null default now(),
   deleted_at timestamptz
