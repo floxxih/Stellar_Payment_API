@@ -44,6 +44,7 @@
     "rehype-prism-plus": "^2.0.0",
     "remark-gfm": "^4.0.0",
     "socket.io-client": "^4.8.1",
+    "sonner": "^2.0.7",
     "stellar-sdk": "^12.2.0",
     "zustand": "^5.0.12",
     "zxcvbn": "^4.4.2"

@@ -4,16 +4,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import Link from "next/link";
 import CopyButton from "@/components/CopyButton";
-import toast from "react-hot-toast";
-import DangerZone from "@/components/DangerZone";
-import WebhookHealthIndicator from "@/components/WebhookHealthIndicator";
-import { EmailReceiptPreview } from "@/components/EmailReceiptPreview";
+import { toast } from "sonner";
 import {
   useHydrateMerchantStore,
   useMerchantApiKey,
   useMerchantHydrated,
   useSetMerchantApiKey,
 } from "@/lib/merchant-store";
+import { useDisplayPreferences } from "@/lib/display-preferences";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const HEX_COLOR_REGEX = /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/;
@@ -24,7 +22,7 @@ const DEFAULT_BRANDING = {
   logo_url: null as string | null,
 };
 
-type SettingsTab = "api" | "branding" | "webhooks" | "danger";
+type SettingsTab = "api" | "branding" | "display" | "webhooks" | "danger";
 
 interface WebhookDomainVerification {
   status: "verified" | "unverified";
@@ -143,6 +141,7 @@ export default function SettingsPage() {
   const [rotating, setRotating] = useState(false);
   const [rotateError, setRotateError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>("api");
+  const { hideCents, setHideCents } = useDisplayPreferences();
   const [branding, setBranding] = useState(DEFAULT_BRANDING);
   const [brandingError, setBrandingError] = useState<string | null>(null);
   const [loadingBranding, setLoadingBranding] = useState(false);
@@ -569,6 +568,17 @@ export default function SettingsPage() {
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab("display")}
+            className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
+              activeTab === "display"
+                ? "bg-white text-black"
+                : "text-slate-300 hover:bg-white/10"
+            }`}
+          >
+            Display
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab("webhooks")}
             className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium ${
               activeTab === "webhooks"
@@ -929,6 +939,36 @@ export default function SettingsPage() {
               </svg>
               Preview Receipt
             </button>
+          </section>
+        )}
+
+        {activeTab === "display" && (
+          <section className="flex flex-col gap-5">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-xs font-medium uppercase tracking-wider text-slate-400">
+                Display Preferences
+              </h2>
+              <p className="text-sm text-slate-500">
+                Adjust how currency values appear in the dashboard.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  checked={hideCents}
+                  onChange={(event) => setHideCents(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border border-white/15 bg-black/40 text-mint focus:ring-mint"
+                />
+                <div className="space-y-1">
+                  <p className="font-semibold text-white">Hide trailing cents</p>
+                  <p className="text-sm text-slate-400">
+                    Whole amounts such as 50 will display without the .00 suffix.
+                  </p>
+                </div>
+              </label>
+            </div>
           </section>
         )}
 
