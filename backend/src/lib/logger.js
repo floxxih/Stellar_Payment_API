@@ -19,6 +19,8 @@ export const logger = pino({
       options: { colorize: true, translateTime: "SYS:standard" },
     },
   }),
+
+  
   redact: {
     paths: REDACTED_PATHS,
     censor: "[REDACTED]",

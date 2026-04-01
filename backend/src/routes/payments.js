@@ -37,6 +37,7 @@ import { sanitizeMetadataMiddleware } from "../lib/sanitize-metadata.js";
 import { supabase } from "../lib/supabase.js";
 import {
   findMatchingPayment,
+  findAnyRecentPayment,
   findStrictReceivePaths,
   getNetworkFeeStats,
 } from "../lib/stellar.js";
@@ -508,10 +509,86 @@ function createPaymentsRouter({
         });
 
         if (!match) {
+          // Check if a payment arrived but with the wrong amount
+          const anyPayment = await findAnyRecentPayment({
+            recipient: data.recipient,
+            assetCode: data.asset,
+            assetIssuer: data.asset_issuer,
+            createdAt: data.created_at,
+          });
+
+          if (anyPayment) {
+            const received = Number(anyPayment.received_amount);
+            const expected = Number(data.amount);
+            const diff = received - expected;
+
+            if (diff < -0.0000001) {
+              // Underpayment — mark as failed with details
+              await supabase.from("payments").update({
+                status: "failed",
+                tx_id: anyPayment.transaction_hash,
+                metadata: {
+                  ...(data.metadata || {}),
+                  failure_reason: "underpayment",
+                  expected_amount: expected,
+                  received_amount: received,
+                  shortfall: Number((expected - received).toFixed(7)),
+                },
+              }).eq("id", data.id);
+
+              const redis = await connectRedisClient();
+              await invalidatePaymentCache(redis, data.id);
+
+              return res.status(402).json({
+                status: "failed",
+                reason: "underpayment",
+                expected_amount: expected,
+                received_amount: received,
+                shortfall: Number((expected - received).toFixed(7)),
+                tx_id: anyPayment.transaction_hash,
+                message: `Payment received but amount was too low. Expected ${expected} ${data.asset}, received ${received} ${data.asset}.`,
+              });
+            }
+
+            if (diff > 0.0000001) {
+              // Overpayment — still confirm but flag it
+              const createdAt = new Date(data.created_at);
+              const latencySeconds = (new Date() - createdAt) / 1000;
+
+              await supabase.from("payments").update({
+                status: "confirmed",
+                tx_id: anyPayment.transaction_hash,
+                completion_duration_seconds: Math.floor(latencySeconds),
+                metadata: {
+                  ...(data.metadata || {}),
+                  overpayment: true,
+                  expected_amount: expected,
+                  received_amount: received,
+                  excess: Number((received - expected).toFixed(7)),
+                },
+              }).eq("id", data.id);
+
+              const redis = await connectRedisClient();
+              await invalidatePaymentCache(redis, data.id);
+
+              return res.json({
+                status: "confirmed",
+                tx_id: anyPayment.transaction_hash,
+                overpayment: true,
+                expected_amount: expected,
+                received_amount: received,
+                excess: Number((received - expected).toFixed(7)),
+                message: `Payment confirmed. Note: overpayment of ${Number((received - expected).toFixed(7))} ${data.asset} received.`,
+              });
+            }
+          }
+
           return res.json({ status: "pending" });
         }
 
-        // Guard: ensure this tx_hash hasn't already confirmed a different payment
+        // Guard: use a DB-level conditional update to prevent race conditions
+        // where two concurrent requests confirm the same tx_hash on different payments.
+        // Only update if tx_id is still NULL (not yet claimed by another payment).
         const { data: existing } = await supabase
           .from("payments")
           .select("id")
@@ -528,18 +605,29 @@ function createPaymentsRouter({
         const now = new Date();
         const latencySeconds = (now - createdAt) / 1000;
 
-        const { error: updateError } = await supabase
+        const { data: updated, error: updateError } = await supabase
           .from("payments")
           .update({
             status: "confirmed",
             tx_id: match.transaction_hash,
             completion_duration_seconds: Math.floor(latencySeconds)
           })
-          .eq("id", data.id);
+          .eq("id", data.id)
+          .eq("status", "pending")
+          .is("tx_id", null)   // atomic claim — only if not already taken
+          .select("id")
+          .maybeSingle();
 
         if (updateError) {
+          if (updateError.code === "23505") {
+            return res.json({ status: "pending" }); // another payment claimed this tx
+          }
           updateError.status = 500;
           throw updateError;
+        }
+
+        if (!updated) {
+          return res.json({ status: "pending" }); // already processed
         }
 
         // --- Invalidate cache so next poll sees confirmed status immediately ---

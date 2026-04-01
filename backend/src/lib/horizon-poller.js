@@ -10,7 +10,7 @@
  */
 
 import { supabase } from "./supabase.js";
-import { findMatchingPayment } from "./stellar.js";
+import { findMatchingPayment, findAnyRecentPayment } from "./stellar.js";
 import { sendWebhook, isEventSubscribed } from "./webhooks.js";
 import { sendReceiptEmail } from "./email.js";
 import { renderReceiptEmail } from "./email-templates.js";
@@ -68,7 +68,24 @@ async function pollPendingPayments() {
 
     logger.info({ count: pending.length }, "Horizon poller: checking pending payments");
 
-    await Promise.allSettled(pending.map(p => checkPayment(p)));
+    // Group by recipient+asset to process same-address payments sequentially
+    // This prevents two payments with identical recipient+amount from both
+    // claiming the same on-chain transaction in the same cycle.
+    const groups = new Map();
+    for (const p of pending) {
+      const key = `${p.recipient}:${p.asset}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(p);
+    }
+
+    // Process each group sequentially, different groups in parallel
+    await Promise.allSettled(
+      Array.from(groups.values()).map(async (group) => {
+        for (const p of group) {
+          await checkPayment(p);
+        }
+      })
+    );
 
   } catch (err) {
     logger.warn({ err }, "Horizon poller: unexpected error");
@@ -97,7 +114,65 @@ async function checkPayment(payment) {
 
     if (!match) {
       logger.info({ paymentId: payment.id }, "Horizon poller: no match yet");
-      return; // not confirmed yet
+
+      // Check for wrong-amount payment
+      const anyPayment = await findAnyRecentPayment({
+        recipient: payment.recipient,
+        assetCode: payment.asset,
+        assetIssuer: payment.asset_issuer,
+        createdAt: payment.created_at,
+      });
+
+      if (anyPayment) {
+        const received = Number(anyPayment.received_amount);
+        const expected = Number(payment.amount);
+        const diff = received - expected;
+
+        if (diff < -0.0000001) {
+          // Underpayment — mark failed
+          await supabase.from("payments").update({
+            status: "failed",
+            tx_id: anyPayment.transaction_hash,
+            metadata: {
+              ...(payment.metadata || {}),
+              failure_reason: "underpayment",
+              expected_amount: expected,
+              received_amount: received,
+              shortfall: Number((expected - received).toFixed(7)),
+            },
+          }).eq("id", payment.id).eq("status", "pending");
+
+          const redis = await connectRedisClient();
+          await invalidatePaymentCache(redis, payment.id);
+          logger.info({ paymentId: payment.id, expected, received }, "Horizon poller: underpayment detected — marked failed");
+
+          // Notify via SSE and Socket.io
+          streamManager.notify(payment.id, "payment.failed", { status: "failed", reason: "underpayment", expected_amount: expected, received_amount: received });
+          if (_io && payment.merchant_id) {
+            _io.to(`merchant:${payment.merchant_id}`).emit("payment:failed", { id: payment.id, reason: "underpayment", expected_amount: expected, received_amount: received });
+          }
+        } else if (diff > 0.0000001) {
+          // Overpayment — confirm but flag
+          const latencySeconds = (Date.now() - new Date(payment.created_at).getTime()) / 1000;
+          const { data: updated } = await supabase.from("payments").update({
+            status: "confirmed",
+            tx_id: anyPayment.transaction_hash,
+            completion_duration_seconds: Math.floor(latencySeconds),
+            metadata: { ...(payment.metadata || {}), overpayment: true, expected_amount: expected, received_amount: received, excess: Number((received - expected).toFixed(7)) },
+          }).eq("id", payment.id).eq("status", "pending").is("tx_id", null).select("id").maybeSingle();
+
+          if (!updated) return; // already claimed
+
+          const redis = await connectRedisClient();
+          await invalidatePaymentCache(redis, payment.id);
+          logger.info({ paymentId: payment.id, expected, received }, "Horizon poller: overpayment — confirmed with flag");
+          streamManager.notify(payment.id, "payment.confirmed", { status: "confirmed", tx_id: anyPayment.transaction_hash, overpayment: true });
+          if (_io && payment.merchant_id) {
+            _io.to(`merchant:${payment.merchant_id}`).emit("payment:confirmed", { id: payment.id, tx_id: anyPayment.transaction_hash, overpayment: true });
+          }
+        }
+      }
+      return;
     }
 
     // Guard: ensure this tx_hash hasn't already confirmed a different payment
@@ -116,8 +191,9 @@ async function checkPayment(payment) {
     const createdAt = new Date(payment.created_at);
     const latencySeconds = (Date.now() - createdAt.getTime()) / 1000;
 
-    // Update DB
-    const { error: updateError } = await supabase
+    // Atomic update: only succeeds if tx_id is still NULL (not claimed by another payment).
+    // The unique index on tx_id provides the final database-level guarantee.
+    const { data: updated, error: updateError } = await supabase
       .from("payments")
       .update({
         status: "confirmed",
@@ -125,10 +201,24 @@ async function checkPayment(payment) {
         completion_duration_seconds: Math.floor(latencySeconds),
       })
       .eq("id", payment.id)
-      .eq("status", "pending"); // guard against double-confirm
+      .eq("status", "pending")
+      .is("tx_id", null)   // ← only claim if not already taken
+      .select("id")
+      .maybeSingle();
 
     if (updateError) {
+      // Unique constraint violation — another payment already claimed this tx
+      if (updateError.code === "23505") {
+        logger.warn({ paymentId: payment.id, txHash: match.transaction_hash }, "Horizon poller: tx_hash already claimed by another payment (unique constraint)");
+        return;
+      }
       logger.warn({ err: updateError, paymentId: payment.id }, "Horizon poller: DB update failed");
+      return;
+    }
+
+    // If updated is null, the row was already confirmed or claimed — skip
+    if (!updated) {
+      logger.info({ paymentId: payment.id }, "Horizon poller: payment already processed, skipping");
       return;
     }
 

@@ -158,7 +158,24 @@ function amountsMatch(expected, received) {
     return false;
   }
 
+  // Exact match within 1 stroop (0.0000001 XLM)
   return Math.abs(expectedNum - receivedNum) <= 0.0000001;
+}
+
+/**
+ * Classify how a received amount compares to the expected amount.
+ * Returns: "exact" | "underpaid" | "overpaid"
+ */
+export function classifyAmount(expected, received) {
+  const expectedNum = Number(expected);
+  const receivedNum = Number(received);
+
+  if (Number.isNaN(expectedNum) || Number.isNaN(receivedNum)) return "exact";
+
+  const diff = receivedNum - expectedNum;
+  if (Math.abs(diff) <= 0.0000001) return "exact";
+  if (diff < 0) return "underpaid";
+  return "overpaid";
 }
 
 function paymentMatchesAsset(payment, asset) {
@@ -318,7 +335,7 @@ export async function findMatchingPayment({
   createdAt, // ISO string — only match transactions after this time
 }) {
   const asset = resolveAsset(assetCode, assetIssuer);
-  const createdAtMs = createdAt ? new Date(createdAt).getTime() : 0;
+  const createdAtMs = createdAt ? new Date(createdAt).getTime() - 60_000 : 0;
 
   let page;
   try {
@@ -383,6 +400,7 @@ export async function findMatchingPayment({
       id: payment.id,
       transaction_hash: payment.transaction_hash,
       is_multisig: isMultiSig,
+      received_amount: payment.amount,
     };
   }
 
@@ -390,7 +408,50 @@ export async function findMatchingPayment({
 }
 
 /**
- * Create a refund transaction XDR for a merchant to sign
+ * Find any recent payment to the recipient regardless of amount.
+ * Used to detect underpayments/overpayments.
+ * Returns { transaction_hash, received_amount } or null.
+ *
+ * Note: we intentionally use a loose time window (no strict createdAt filter)
+ * because Horizon ledger close times can have slight clock skew vs our DB.
+ * The tx_id uniqueness constraint prevents false matches from older transactions.
+ */
+export async function findAnyRecentPayment({
+  recipient,
+  assetCode,
+  assetIssuer,
+  createdAt,
+}) {
+  const asset = resolveAsset(assetCode, assetIssuer);
+  // Allow 60s of clock skew — reject anything more than 60s before intent creation
+  const cutoffMs = createdAt ? new Date(createdAt).getTime() - 60_000 : 0;
+
+  let page;
+  try {
+    page = await server.payments().forAccount(recipient).order("desc").limit(100).call();
+  } catch {
+    return null;
+  }
+
+  for (const payment of page.records) {
+    if (payment.type !== "payment" && payment.type !== "path_payment_strict_receive") continue;
+    if (payment.to !== recipient) continue;
+    if (!paymentMatchesAsset(payment, asset)) continue;
+
+    // Skip payments that are clearly older than the intent (with 60s slack)
+    if (cutoffMs > 0 && payment.created_at) {
+      if (new Date(payment.created_at).getTime() < cutoffMs) continue;
+    }
+
+    return {
+      transaction_hash: payment.transaction_hash,
+      received_amount: payment.amount,
+    };
+  }
+  return null;
+}
+
+/*
  * Issue #150: Implement a Refund API Transaction Helper
  */
 export async function createRefundTransaction({

@@ -507,9 +507,23 @@ export default function PaymentPage() {
               )}
 
               {isFailed && (
-                <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-center">
+                <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-center flex flex-col gap-2">
                   <p className="text-sm font-bold text-red-700">{t("failedTitle")}</p>
-                  <p className="mt-1 text-xs text-red-500">{t("failedDescription")}</p>
+                  {payment.metadata?.failure_reason === "underpayment" ? (
+                    <div className="flex flex-col gap-1">
+                      <p className="text-xs text-red-600 font-medium">Underpayment detected</p>
+                      <p className="text-xs text-red-500">
+                        Expected <span className="font-bold">{payment.metadata.expected_amount} {payment.asset.toUpperCase()}</span>,
+                        received <span className="font-bold">{payment.metadata.received_amount} {payment.asset.toUpperCase()}</span>.
+                      </p>
+                      <p className="text-xs text-red-500 mt-1">
+                        Shortfall: <span className="font-bold">{payment.metadata.shortfall} {payment.asset.toUpperCase()}</span>
+                      </p>
+                      <p className="text-[10px] text-red-400 mt-2">Please contact the merchant to arrange a top-up or refund.</p>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-red-500">{t("failedDescription")}</p>
+                  )}
                 </div>
               )}
             </div>
