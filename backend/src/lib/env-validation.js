@@ -4,7 +4,6 @@ function validateEnvironmentVariables() {
     'SUPABASE_SERVICE_ROLE_KEY',
     'STELLAR_NETWORK',
     'DATABASE_URL',
-    'REDIS_URL',
   ];
 
   const missing = required.filter(key => !process.env[key]);
@@ -52,8 +51,12 @@ function validateEnvironmentVariables() {
   }
 
   if (!process.env.RESEND_API_KEY) {
-  console.warn("⚠️  RESEND_API_KEY is not set — receipt emails will be disabled.");
-}
+    console.warn("⚠️  RESEND_API_KEY is not set — receipt emails will be disabled.");
+  }
+
+  if (!process.env.REDIS_URL) {
+    console.warn("⚠️  REDIS_URL is not set — running without Redis (fallback mode).");
+  }
 
   console.log('✅ Environment variables validated');
 }

@@ -1,15 +1,35 @@
 import { createClient } from "redis";
 
 let redisClient;
+let redisErrorCount = 0;
+
+function getRedisConnectTimeoutMs(env = process.env) {
+  const raw = Number.parseInt(String(env.REDIS_CONNECT_TIMEOUT_MS || "4000"), 10);
+  if (!Number.isFinite(raw) || raw <= 0) return 4000;
+  return raw;
+}
 
 export function getRedisClient({
   redisUrl = process.env.REDIS_URL,
   clientFactory = createClient,
 } = {}) {
   if (!redisClient) {
-    redisClient = clientFactory({ url: redisUrl });
+    redisClient = clientFactory({
+      url: redisUrl,
+      socket: {
+        connectTimeout: getRedisConnectTimeoutMs(),
+        // Prevent endless reconnect loops when Redis URL is invalid/unreachable.
+        reconnectStrategy: () => false,
+      },
+    });
     redisClient.on("error", (err) => {
-      console.error("Redis client error:", err.message);
+      redisErrorCount += 1;
+      const suffix = err?.message ? ` ${err.message}` : "";
+      if (redisErrorCount <= 3) {
+        console.error("Redis client error:" + suffix);
+      } else if (redisErrorCount === 4) {
+        console.error("Redis client error: suppressing repeated logs");
+      }
     });
   }
   return redisClient;
@@ -18,7 +38,18 @@ export function getRedisClient({
 export async function connectRedisClient(options) {
   const client = getRedisClient(options);
   if (!client.isOpen) {
-    await client.connect();
+    const timeoutMs = getRedisConnectTimeoutMs();
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`Redis connection timed out after ${timeoutMs}ms`)), timeoutMs);
+    });
+    try {
+      await Promise.race([client.connect(), timeout]);
+    } catch (err) {
+      try {
+        client.disconnect();
+      } catch {}
+      throw err;
+    }
   }
   return client;
 }
