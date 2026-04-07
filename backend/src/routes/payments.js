@@ -359,24 +359,57 @@ function createPaymentsRouter({
           return res.json({ payment: cached });
         }
 
-        let query = supabase
-          .from("payments")
-          .select(
-            "id, amount, asset, asset_issuer, recipient, description, memo, memo_type, status, tx_id, metadata, created_at, merchants(branding_config)"
-          );
+        const baseFields =
+          "id, merchant_id, amount, asset, asset_issuer, recipient, description, memo, memo_type, status, tx_id, metadata, created_at";
+        const withMerchantJoin = `${baseFields}, merchants(branding_config)`;
 
-        if (req.merchant?.id) {
-          query = query.eq("merchant_id", req.merchant.id);
+        const runPaymentQuery = async ({ includeJoin, includeDeletedFilter }) => {
+          let query = supabase
+            .from("payments")
+            .select(includeJoin ? withMerchantJoin : baseFields);
+
+          if (req.merchant?.id) {
+            query = query.eq("merchant_id", req.merchant.id);
+          }
+
+          query = query.eq("id", req.params.id);
+          if (includeDeletedFilter) {
+            query = query.is("deleted_at", null);
+          }
+
+          const { data, error } = await query.maybeSingle();
+          return { data, error, includeJoin };
+        };
+
+        // Schema-tolerant fallback order for local/dev databases:
+        // 1) join + deleted_at filter (latest schema)
+        // 2) join only
+        // 3) base fields + deleted_at filter
+        // 4) base fields only
+        const attempts = [
+          { includeJoin: true, includeDeletedFilter: true },
+          { includeJoin: true, includeDeletedFilter: false },
+          { includeJoin: false, includeDeletedFilter: true },
+          { includeJoin: false, includeDeletedFilter: false },
+        ];
+
+        let data = null;
+        let queryError = null;
+        let usedJoin = false;
+        for (const attempt of attempts) {
+          const result = await runPaymentQuery(attempt);
+          if (!result.error) {
+            data = result.data;
+            usedJoin = result.includeJoin;
+            queryError = null;
+            break;
+          }
+          queryError = result.error;
         }
 
-        const { data, error } = await query
-          .eq("id", req.params.id)
-          .is("deleted_at", null)
-          .maybeSingle();
-
-        if (error) {
-          error.status = 500;
-          throw error;
+        if (queryError) {
+          queryError.status = 500;
+          throw queryError;
         }
 
         if (!data) {
@@ -384,7 +417,15 @@ function createPaymentsRouter({
         }
 
         const metadataBranding = data.metadata?.branding_config || null;
-        const merchantBranding = data.merchants?.branding_config || null;
+        let merchantBranding = usedJoin ? data.merchants?.branding_config || null : null;
+        if (!merchantBranding && data.merchant_id) {
+          const { data: merchantData } = await supabase
+            .from("merchants")
+            .select("branding_config")
+            .eq("id", data.merchant_id)
+            .maybeSingle();
+          merchantBranding = merchantData?.branding_config || null;
+        }
         const brandingConfig = metadataBranding || merchantBranding || null;
 
         const response = {

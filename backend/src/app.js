@@ -145,6 +145,17 @@ export async function createApp({ redisClient }) {
   // Expose the root logger on app.locals so routes can use req.log or app.locals.logger
   app.locals.logger = logger;
 
+  // Root route for platform/browser checks.
+  app.get("/", (_req, res) => {
+    res.status(200).json({
+      ok: true,
+      service: "pluto-api",
+      docs: "/api-docs",
+      health: "/health",
+      ready: "/ready",
+    });
+  });
+
   // Readiness probe for platforms (Railway, etc.).
   // Keep this independent from external dependency checks so orchestrators
   // don't restart a healthy process when Horizon/DB has transient issues.

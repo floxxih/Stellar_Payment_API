@@ -19,7 +19,11 @@ async function startServer() {
   let redisClient = null;
   try {
     redisClient = await connectRedisClient();
-    logger.info("redis connected");
+    if (redisClient?.isOpen) {
+      logger.info("redis connected");
+    } else {
+      logger.warn("redis unavailable, continuing with in-memory fallbacks");
+    }
   } catch (err) {
     logger.warn({ err }, "redis unavailable, continuing with in-memory fallbacks");
   }
