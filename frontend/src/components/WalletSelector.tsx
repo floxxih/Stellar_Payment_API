@@ -15,7 +15,7 @@ interface WalletSelectorProps {
 // Freighter icon SVG
 function FreighterIcon() {
   return (
-    <svg viewBox="0 0 32 32" className="h-5 w-5" fill="none">
+    <svg viewBox="0 0 32 32" className="h-5 w-5" fill="none" aria-hidden="true" role="img">
       <rect width="32" height="32" rx="8" fill="#7B61FF" />
       <path d="M8 16h16M16 8l8 8-8 8" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
@@ -24,7 +24,7 @@ function FreighterIcon() {
 
 function WalletConnectIcon() {
   return (
-    <svg viewBox="0 0 32 32" className="h-5 w-5" fill="none">
+    <svg viewBox="0 0 32 32" className="h-5 w-5" fill="none" aria-hidden="true" role="img">
       <rect width="32" height="32" rx="8" fill="#3B99FC" />
       <path d="M9.5 13.5c3.6-3.5 9.4-3.5 13 0l.4.4a.4.4 0 010 .6l-1.5 1.4a.2.2 0 01-.3 0l-.6-.6c-2.5-2.4-6.5-2.4-9 0l-.6.6a.2.2 0 01-.3 0L9 14.5a.4.4 0 010-.6l.5-.4zm16 3 1.3 1.3a.4.4 0 010 .6l-6 5.8a.4.4 0 01-.6 0l-4.2-4.1a.1.1 0 00-.2 0l-4.2 4.1a.4.4 0 01-.6 0l-6-5.8a.4.4 0 010-.6L6.5 16.5a.4.4 0 01.6 0l4.2 4.1c.1.1.1.1.2 0l4.2-4.1a.4.4 0 01.6 0l4.2 4.1c.1.1.1.1.2 0l4.2-4.1a.4.4 0 01.6 0z" fill="white" />
     </svg>
@@ -213,8 +213,8 @@ export default function WalletSelector({ networkPassphrase, onConnected }: Walle
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <p className="text-sm font-bold text-white">{t("chooseWallet")}</p>
-        <p className="mt-0.5 text-xs text-slate-400">{t("description")}</p>
+        <p className="text-sm font-bold text-slate-900 dark:text-white">{t("chooseWallet")}</p>
+        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{t("description")}</p>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -223,17 +223,24 @@ export default function WalletSelector({ networkPassphrase, onConnected }: Walle
 
       {/* WalletConnect QR */}
       {wcUri && (
-        <div className="flex flex-col items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.02] p-6" aria-live="polite">
-          <p className="text-xs font-bold uppercase tracking-widest text-slate-500">{t("scanTitle")}</p>
-          <div className="rounded-xl bg-white p-3 shadow-[0_0_20px_rgba(255,255,255,0.05)]">
-            <QRCodeSVG value={wcUri} size={200} level="M" fgColor="#0A0A0A" bgColor="#ffffff" />
+        <div className="flex flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-6 transition-all duration-300 hover:border-pluto-300 hover:shadow-[0_0_30px_rgba(74,111,165,0.1)] dark:border-white/10 dark:bg-white/[0.02] dark:hover:border-white/20 dark:hover:shadow-[0_0_30px_rgba(255,255,255,0.05)]" aria-live="polite">
+          <p className="text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">{t("scanTitle")}</p>
+          <div className="rounded-xl bg-white p-3 shadow-sm dark:shadow-[0_0_20px_rgba(255,255,255,0.05)]">
+            <QRCodeSVG
+              value={wcUri}
+              size={512}
+              level="H"
+              fgColor="#0A0A0A"
+              bgColor="#ffffff"
+              style={{ width: "100%", height: "auto", maxWidth: "200px" }}
+            />
           </div>
-          <p className="text-center text-[10px] text-slate-500">{t("scanDescription")}</p>
+          <p className="text-center text-[10px] text-slate-500 dark:text-slate-400">{t("scanDescription")}</p>
         </div>
       )}
 
       {(wcError || connectError) && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-center text-sm text-red-400" role="alert" aria-live="polite">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-center text-sm text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-400" role="alert" aria-live="polite">
           {wcError || connectError}
         </div>
       )}
@@ -244,7 +251,7 @@ export default function WalletSelector({ networkPassphrase, onConnected }: Walle
           href="https://freighter.app"
           target="_blank"
           rel="noopener noreferrer"
-          className="text-center text-[10px] font-bold uppercase tracking-widest text-[var(--pluto-500)] transition-colors duration-150 hover:text-[var(--pluto-700)]"
+          className="text-center text-[10px] font-bold uppercase tracking-widest text-pluto-500 transition-colors duration-150 hover:text-pluto-700 dark:text-pluto-400 dark:hover:text-pluto-300"
         >
           Don&apos;t have Freighter? Install it →
         </a>
